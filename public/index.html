@@ -3,23 +3,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Private Chat</title>
+  <title>Chat App</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; }
     .wrap { display:flex; height:100vh; }
     .sidebar { width:220px; border-right:1px solid #ddd; padding:12px; box-sizing:border-box; }
     .main { flex:1; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; }
     .users { list-style:none; padding:0; margin:8px 0; }
     .users li { padding:8px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
-    .chat { flex:1; border:1px solid #eee; padding:8px; overflow:auto; background:#fafafa; }
+    .chat { flex:1; border:1px solid #eee; padding:8px; overflow:auto; background:#fafafa; display:flex; flex-direction:column; }
     .composer { margin-top:8px; display:flex; gap:8px; }
     .composer input { flex:1; padding:8px; }
+    .tab { cursor:pointer; margin-right:10px; font-weight:bold; }
+    .tab.active { color:blue; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="sidebar">
-      <h3>Private Chat</h3>
+      <h3>Chat App</h3>
       <div>
         <label>Your name:</label><br />
         <input id="username" placeholder="type a name" />
@@ -27,12 +29,16 @@
       </div>
       <hr />
       <div>
+        <span id="tabGroup" class="tab active">Group Chat</span>
+        <span id="tabPrivate" class="tab">Private</span>
+      </div>
+      <div id="privateUsers" style="display:none;">
         <strong>Online users</strong>
         <ul id="users" class="users"></ul>
       </div>
     </div>
     <div class="main">
-      <div><strong>Chat with: <span id="chatWith">(none)</span></strong></div>
+      <div><strong>Chat with: <span id="chatWith">Group</span></strong></div>
       <div id="chat" class="chat"></div>
       <div class="composer">
         <input id="message" placeholder="Type message and press Send" />
@@ -51,9 +57,12 @@
     const chatBox = document.getElementById('chat');
     const msgInput = document.getElementById('message');
     const sendBtn = document.getElementById('send');
+    const tabGroup = document.getElementById('tabGroup');
+    const tabPrivate = document.getElementById('tabPrivate');
+    const privateUsersDiv = document.getElementById('privateUsers');
 
     let myName = null;
-    let currentChatWith = null; // username
+    let currentChatWith = 'GROUP'; // 'GROUP' or username
 
     btnRegister.onclick = () => {
       const name = usernameInput.value.trim();
@@ -70,10 +79,28 @@
       });
     };
 
+    // Switch tabs
+    tabGroup.onclick = () => {
+      tabGroup.classList.add('active');
+      tabPrivate.classList.remove('active');
+      privateUsersDiv.style.display = 'none';
+      currentChatWith = 'GROUP';
+      chatWithLabel.textContent = 'Group';
+      chatBox.innerHTML = '';
+    };
+    tabPrivate.onclick = () => {
+      tabPrivate.classList.add('active');
+      tabGroup.classList.remove('active');
+      privateUsersDiv.style.display = 'block';
+      chatWithLabel.textContent = '(none)';
+      chatBox.innerHTML = '';
+      currentChatWith = null;
+    };
+
     socket.on('online_users', (list) => {
       usersList.innerHTML = '';
       list.forEach(u => {
-        if (u === myName) return; // don't show yourself
+        if (u === myName) return;
         const li = document.createElement('li');
         li.textContent = u;
         li.onclick = () => {
@@ -85,15 +112,24 @@
       });
     });
 
-    // Receive private message
+    // Receive private
     socket.on('private_message', (msg) => {
       const fromMe = msg.from === myName;
       const other = fromMe ? msg.to : msg.from;
       if (other !== currentChatWith) {
-        appendSystem(`New message ${fromMe ? 'to' : 'from'} ${other} (open chat to view)`);
+        appendSystem(`New private message ${fromMe ? 'to' : 'from'} ${other}`);
         return;
       }
       appendMessage(msg.from, msg.message, fromMe);
+    });
+
+    // Receive group
+    socket.on('group_message', (msg) => {
+      if (currentChatWith !== 'GROUP') {
+        appendSystem(`New group message from ${msg.from}`);
+        return;
+      }
+      appendMessage(msg.from, msg.message, msg.from === myName);
     });
 
     sendBtn.onclick = sendMessage;
@@ -103,15 +139,18 @@
       const text = msgInput.value.trim();
       if (!text) return;
       if (!myName) return alert('register first');
-      if (!currentChatWith) return alert('select a user to chat with');
 
-      socket.emit('private_message', { to: currentChatWith, message: text }, (res) => {
-        if (res && res.ok) {
-          msgInput.value = '';
-        } else {
-          alert('sending failed: ' + (res && res.error));
-        }
-      });
+      if (currentChatWith === 'GROUP') {
+        socket.emit('group_message', { message: text }, (res) => {
+          if (res.ok) msgInput.value = '';
+        });
+      } else if (currentChatWith) {
+        socket.emit('private_message', { to: currentChatWith, message: text }, (res) => {
+          if (res.ok) msgInput.value = '';
+        });
+      } else {
+        alert('select chat target');
+      }
     }
 
     function appendMessage(from, text, fromMe) {
@@ -138,7 +177,7 @@
     }
 
     function escapeHtml(s) {
-      return s.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+      return s.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     }
   </script>
 </body>
