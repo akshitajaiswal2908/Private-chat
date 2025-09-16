@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Private Chat</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; }
+    .wrap { display:flex; height:100vh; }
+    .sidebar { width:220px; border-right:1px solid #ddd; padding:12px; box-sizing:border-box; }
+    .main { flex:1; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; }
+    .users { list-style:none; padding:0; margin:8px 0; }
+    .users li { padding:8px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
+    .chat { flex:1; border:1px solid #eee; padding:8px; overflow:auto; background:#fafafa; }
+    .composer { margin-top:8px; display:flex; gap:8px; }
+    .composer input { flex:1; padding:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="sidebar">
+      <h3>Private Chat</h3>
+      <div>
+        <label>Your name:</label><br />
+        <input id="username" placeholder="type a name" />
+        <button id="btnRegister">Connect</button>
+      </div>
+      <hr />
+      <div>
+        <strong>Online users</strong>
+        <ul id="users" class="users"></ul>
+      </div>
+    </div>
+    <div class="main">
+      <div><strong>Chat with: <span id="chatWith">(none)</span></strong></div>
+      <div id="chat" class="chat"></div>
+      <div class="composer">
+        <input id="message" placeholder="Type message and press Send" />
+        <button id="send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const usernameInput = document.getElementById('username');
+    const btnRegister = document.getElementById('btnRegister');
+    const usersList = document.getElementById('users');
+    const chatWithLabel = document.getElementById('chatWith');
+    const chatBox = document.getElementById('chat');
+    const msgInput = document.getElementById('message');
+    const sendBtn = document.getElementById('send');
+
+    let myName = null;
+    let currentChatWith = null; // username
+
+    btnRegister.onclick = () => {
+      const name = usernameInput.value.trim();
+      if (!name) return alert('enter a name');
+      socket.emit('register', name, (res) => {
+        if (res && res.ok) {
+          myName = name;
+          usernameInput.disabled = true;
+          btnRegister.disabled = true;
+          appendSystem(`You are connected as ${myName}`);
+        } else {
+          alert('register failed: ' + (res && res.error));
+        }
+      });
+    };
+
+    socket.on('online_users', (list) => {
+      usersList.innerHTML = '';
+      list.forEach(u => {
+        if (u === myName) return; // don't show yourself
+        const li = document.createElement('li');
+        li.textContent = u;
+        li.onclick = () => {
+          currentChatWith = u;
+          chatWithLabel.textContent = u;
+          chatBox.innerHTML = '';
+        };
+        usersList.appendChild(li);
+      });
+    });
+
+    // Receive private message
+    socket.on('private_message', (msg) => {
+      const fromMe = msg.from === myName;
+      const other = fromMe ? msg.to : msg.from;
+      if (other !== currentChatWith) {
+        appendSystem(`New message ${fromMe ? 'to' : 'from'} ${other} (open chat to view)`);
+        return;
+      }
+      appendMessage(msg.from, msg.message, fromMe);
+    });
+
+    sendBtn.onclick = sendMessage;
+    msgInput.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
+
+    function sendMessage() {
+      const text = msgInput.value.trim();
+      if (!text) return;
+      if (!myName) return alert('register first');
+      if (!currentChatWith) return alert('select a user to chat with');
+
+      socket.emit('private_message', { to: currentChatWith, message: text }, (res) => {
+        if (res && res.ok) {
+          msgInput.value = '';
+        } else {
+          alert('sending failed: ' + (res && res.error));
+        }
+      });
+    }
+
+    function appendMessage(from, text, fromMe) {
+      const div = document.createElement('div');
+      div.style.padding = '6px';
+      div.style.margin = '6px 0';
+      div.style.borderRadius = '6px';
+      div.style.maxWidth = '70%';
+      div.style.alignSelf = fromMe ? 'flex-end' : 'flex-start';
+      div.style.background = fromMe ? '#dff0d8' : '#fff';
+      div.innerHTML = `<small><strong>${from}</strong></small><div>${escapeHtml(text)}</div>`;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function appendSystem(text) {
+      const div = document.createElement('div');
+      div.style.fontSize = '12px';
+      div.style.color = '#666';
+      div.style.margin = '6px 0';
+      div.textContent = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+    }
+  </script>
+</body>
+</html>
