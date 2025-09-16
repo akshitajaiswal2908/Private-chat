@@ -1,183 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Chat App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js" defer></script>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; }
-    .wrap { display:flex; height:100vh; }
-    .sidebar { width:220px; border-right:1px solid #ddd; padding:12px; box-sizing:border-box; }
-    .main { flex:1; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; }
-    .users { list-style:none; padding:0; margin:8px 0; }
-    .users li { padding:8px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
-    .chat { flex:1; border:1px solid #eee; padding:8px; overflow:auto; background:#fafafa; display:flex; flex-direction:column; }
-    .composer { margin-top:8px; display:flex; gap:8px; }
-    .composer input { flex:1; padding:8px; }
-    .tab { cursor:pointer; margin-right:10px; font-weight:bold; }
-    .tab.active { color:blue; }
+    #chat-box {
+      border: 1px solid black;
+      height: 300px;
+      overflow-y: scroll;
+      margin: 10px 0;
+      padding: 5px;
+    }
+    #user-list {
+      margin: 10px 0;
+    }
+    #user-list button {
+      margin: 3px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    #chat-header {
+      font-weight: bold;
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="sidebar">
-      <h3>Chat App</h3>
-      <div>
-        <label>Your name:</label><br />
-        <input id="username" placeholder="type a name" />
-        <button id="btnRegister">Connect</button>
-      </div>
-      <hr />
-      <div>
-        <span id="tabGroup" class="tab active">Group Chat</span>
-        <span id="tabPrivate" class="tab">Private</span>
-      </div>
-      <div id="privateUsers" style="display:none;">
-        <strong>Online users</strong>
-        <ul id="users" class="users"></ul>
-      </div>
-    </div>
-    <div class="main">
-      <div><strong>Chat with: <span id="chatWith">Group</span></strong></div>
-      <div id="chat" class="chat"></div>
-      <div class="composer">
-        <input id="message" placeholder="Type message and press Send" />
-        <button id="send">Send</button>
-      </div>
-    </div>
-  </div>
+  <h2>🔗 Simple Chat App</h2>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- Register -->
+  <input id="username" placeholder="Enter username">
+  <button onclick="register(document.getElementById('username').value)">Register</button>
+
+  <!-- Users -->
+  <div id="user-list"></div>
+
+  <!-- Chat header -->
+  <h3 id="chat-header">💬 Group Chat</h3>
+
+  <!-- Chat box -->
+  <div id="chat-box"></div>
+
+  <!-- Message input -->
+  <input id="message" placeholder="Enter message">
+  <button onclick="sendMessage()">Send</button>
+
   <script>
-    const socket = io();
-    const usernameInput = document.getElementById('username');
-    const btnRegister = document.getElementById('btnRegister');
-    const usersList = document.getElementById('users');
-    const chatWithLabel = document.getElementById('chatWith');
-    const chatBox = document.getElementById('chat');
-    const msgInput = document.getElementById('message');
-    const sendBtn = document.getElementById('send');
-    const tabGroup = document.getElementById('tabGroup');
-    const tabPrivate = document.getElementById('tabPrivate');
-    const privateUsersDiv = document.getElementById('privateUsers');
-
-    let myName = null;
-    let currentChatWith = 'GROUP'; // 'GROUP' or username
-
-    btnRegister.onclick = () => {
-      const name = usernameInput.value.trim();
-      if (!name) return alert('enter a name');
-      socket.emit('register', name, (res) => {
-        if (res && res.ok) {
-          myName = name;
-          usernameInput.disabled = true;
-          btnRegister.disabled = true;
-          appendSystem(`You are connected as ${myName}`);
-        } else {
-          alert('register failed: ' + (res && res.error));
-        }
-      });
-    };
-
-    // Switch tabs
-    tabGroup.onclick = () => {
-      tabGroup.classList.add('active');
-      tabPrivate.classList.remove('active');
-      privateUsersDiv.style.display = 'none';
-      currentChatWith = 'GROUP';
-      chatWithLabel.textContent = 'Group';
-      chatBox.innerHTML = '';
-    };
-    tabPrivate.onclick = () => {
-      tabPrivate.classList.add('active');
-      tabGroup.classList.remove('active');
-      privateUsersDiv.style.display = 'block';
-      chatWithLabel.textContent = '(none)';
-      chatBox.innerHTML = '';
-      currentChatWith = null;
-    };
-
-    socket.on('online_users', (list) => {
-      usersList.innerHTML = '';
-      list.forEach(u => {
-        if (u === myName) return;
-        const li = document.createElement('li');
-        li.textContent = u;
-        li.onclick = () => {
-          currentChatWith = u;
-          chatWithLabel.textContent = u;
-          chatBox.innerHTML = '';
-        };
-        usersList.appendChild(li);
-      });
-    });
-
-    // Receive private
-    socket.on('private_message', (msg) => {
-      const fromMe = msg.from === myName;
-      const other = fromMe ? msg.to : msg.from;
-      if (other !== currentChatWith) {
-        appendSystem(`New private message ${fromMe ? 'to' : 'from'} ${other}`);
-        return;
-      }
-      appendMessage(msg.from, msg.message, fromMe);
-    });
-
-    // Receive group
-    socket.on('group_message', (msg) => {
-      if (currentChatWith !== 'GROUP') {
-        appendSystem(`New group message from ${msg.from}`);
-        return;
-      }
-      appendMessage(msg.from, msg.message, msg.from === myName);
-    });
-
-    sendBtn.onclick = sendMessage;
-    msgInput.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
-
     function sendMessage() {
-      const text = msgInput.value.trim();
-      if (!text) return;
-      if (!myName) return alert('register first');
-
-      if (currentChatWith === 'GROUP') {
-        socket.emit('group_message', { message: text }, (res) => {
-          if (res.ok) msgInput.value = '';
-        });
-      } else if (currentChatWith) {
-        socket.emit('private_message', { to: currentChatWith, message: text }, (res) => {
-          if (res.ok) msgInput.value = '';
-        });
+      const msg = document.getElementById("message").value;
+      if (!msg) return;
+      if (currentChat === "group") {
+        sendGroup(msg);
       } else {
-        alert('select chat target');
+        sendPrivate(currentChat, msg);
       }
-    }
-
-    function appendMessage(from, text, fromMe) {
-      const div = document.createElement('div');
-      div.style.padding = '6px';
-      div.style.margin = '6px 0';
-      div.style.borderRadius = '6px';
-      div.style.maxWidth = '70%';
-      div.style.alignSelf = fromMe ? 'flex-end' : 'flex-start';
-      div.style.background = fromMe ? '#dff0d8' : '#fff';
-      div.innerHTML = `<small><strong>${from}</strong></small><div>${escapeHtml(text)}</div>`;
-      chatBox.appendChild(div);
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function appendSystem(text) {
-      const div = document.createElement('div');
-      div.style.fontSize = '12px';
-      div.style.color = '#666';
-      div.style.margin = '6px 0';
-      div.textContent = text;
-      chatBox.appendChild(div);
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function escapeHtml(s) {
-      return s.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      document.getElementById("message").value = "";
     }
   </script>
 </body>
